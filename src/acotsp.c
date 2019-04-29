@@ -66,7 +66,10 @@
 #include "timer.h"
 #include "ls.h"
 
-
+int iLevyFlag = 0;		// 0 or 1, default 0;
+double dLevyThreshold=1;		//0--1
+double dLevyRatio=1;			//0.1--1
+double dContribution=0;  		//0--10
 
 long int termination_condition( void )
 /*    

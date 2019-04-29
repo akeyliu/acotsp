@@ -66,6 +66,10 @@
 #include "ls.h"
 #include "parse.h"
 
+extern int iLevyFlag;				// 0 or 1.
+extern double dLevyThreshold;		//0--1
+extern double dLevyRatio;			//0.1--1
+extern double dContribution;  		//0--10
 
 long int *best_in_try;
 long int *best_found_at;
@@ -652,6 +656,8 @@ void exit_program( void )
   t_avgtotal = meanr( time_total_run, max_tries );
   printf(" t_avgtotal = %f\n", t_avgtotal );
   t_stdtotal = std_deviationr( time_total_run, max_tries, t_avgtotal);
+
+  fprintf(stderr, "%lf,%lf,%lf,%ld,%ld,%lf\n", dLevyThreshold, dLevyRatio, dContribution ,best_tour_length, found_best, elapsed_time( VIRTUAL ));
 
   if (report) {
       fprintf(report,"\nAverage-Best: %.2f\t Average-Iterations: %.2f", avg_sol_quality, avg_cyc_to_bst);

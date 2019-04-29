@@ -65,7 +65,10 @@
 #include "utilities.h"
 #include "timer.h"
 
-
+extern int iLevyFlag;		// 0 or 1.
+extern double dLevyThreshold;		//0--1
+extern double dLevyRatio;			//0.1--1
+extern double dContribution;  		//0--10
 
 ant_struct *ant;
 ant_struct *best_so_far_ant;
@@ -291,15 +294,18 @@ void global_update_pheromone( ant_struct *a )
 */
 {  
     long int i, j, h;
-    double   d_tau;
+    //double   d_tau;
 
     TRACE ( printf("global pheromone update\n"); );
 
-    d_tau = 1.0 / (double) a->tour_length;
+    //d_tau = 1.0 / (double) a->tour_length;
     for ( i = 0 ; i < n ; i++ ) {
 	j = a->tour[i];
 	h = a->tour[i+1];
-	pheromone[j][h] += d_tau;
+	//pheromone[j][h] += d_tau;
+	//pheromone[j][h] += ( 1 + dContribution ) / ( 1 + dContribution * instance.n * instance.distance[j][h] / a->tour_length );
+	//pheromone[j][h] += ( 1 - dContribution * instance.distance[j][h] / a->tour_length ) / ( 1 - dContribution / instance.n ) / a->tour_length;
+	pheromone[j][h] += 2 / ( a->tour_length + dContribution * instance.n * instance.distance[j][h] );
 	pheromone[h][j] = pheromone[j][h];
     }
 }
@@ -319,11 +325,12 @@ void global_update_pheromone_weighted( ant_struct *a, long int weight )
 
     TRACE ( printf("global pheromone update weighted\n"); );
 
-    d_tau = (double) weight / (double) a->tour_length;
+    //d_tau = (double) weight / (double) a->tour_length;
     for ( i = 0 ; i < n ; i++ ) {
 	j = a->tour[i];
 	h = a->tour[i+1];
-	pheromone[j][h] += d_tau;
+	//pheromone[j][h] += d_tau;
+	pheromone[j][h] += 2 * weight / ( a->tour_length + dContribution * instance.n * instance.distance[j][h] );
 	pheromone[h][j] = pheromone[j][h];
     }       
 }
@@ -544,7 +551,7 @@ void neighbour_choose_and_move_to_next( ant_struct *a , long int phase )
 	of the nearest neighbor cities */
     double   *prob_ptr;
 
-
+	long int ordered_city[nn_ants];
 
     if ( (q_0 > 0.0) && (ran01( &seed ) < q_0)  ) {
 	/* with a probability q_0 make the best possible choice
@@ -567,9 +574,45 @@ void neighbour_choose_and_move_to_next( ant_struct *a , long int phase )
 	    DEBUG( assert ( instance.nn_list[current_city][i] >= 0 && instance.nn_list[current_city][i] < n ); )
 	    prob_ptr[i] = total[current_city][instance.nn_list[current_city][i]];
 	    sum_prob += prob_ptr[i];
-	} 
+	}
+	ordered_city[i] = i;	//define original value;
     }
 
+	/*
+	printf("Pheromone before sort!\n");
+	for( i=0; i<nn_ants; i++ )
+	{
+		printf("Pheromone [%ld] is [%ld] [%lf].\n", i, ordered_city[i], prob_ptr[ ordered_city[i] ] ); 
+	}
+	*/
+
+	if( iLevyFlag )
+	{
+		//Sort City by total value.
+		int iStopFlag = 0;
+		while( !iStopFlag )
+		{
+			iStopFlag = 1;
+			for( i = 0; i < nn_ants-1; i++ )
+			{
+				if( prob_ptr[ ordered_city[i] ] < prob_ptr[ ordered_city[i+1] ] )
+				{
+					long int j = ordered_city[i];
+					ordered_city[i] = ordered_city[i+1];
+					ordered_city[i+1] = j;
+					iStopFlag = 0;
+				}
+			}
+		}
+		/*
+		printf("Pheromone after sort!\n");
+		for( i=0; i<nn_ants; i++ )
+		{
+			printf("Pheromone [%ld] is [%ld] [%lf].\n", i, ordered_city[i], prob_ptr[ ordered_city[i] ] ); 
+		}
+		*/
+	}
+	
     if (sum_prob <= 0.0) {
 	/* All cities from the candidate set are tabu */
 	choose_best_next( a, phase );
@@ -578,13 +621,29 @@ void neighbour_choose_and_move_to_next( ant_struct *a , long int phase )
 	/* at least one neighbor is eligible, chose one according to the
 	   selection probabilities */
 	rnd = ran01( &seed );
+	
+	if( iLevyFlag )
+	{
+		double rndLevy = ran01( &seed );
+		if( rndLevy > dLevyThreshold )
+		{
+			rnd = 1 - 1/dLevyRatio * (1-rnd) * (1-rndLevy) / (1-dLevyThreshold);
+		}
+	}
 	rnd *= sum_prob;
 	i = 0;
-	partial_sum = prob_ptr[i];
+
+	if( iLevyFlag )
+		partial_sum = prob_ptr[ ordered_city[i] ];
+	else
+		partial_sum = prob_ptr[i];
         /* This loop always stops because prob_ptr[nn_ants] == HUGE_VAL  */
         while (partial_sum <= rnd) {
             i++;
-            partial_sum += prob_ptr[i];
+			if( iLevyFlag )
+				partial_sum += prob_ptr[ ordered_city[i] ];
+			else
+				partial_sum += prob_ptr[i];
         }
         /* This may very rarely happen because of rounding if rnd is
            close to 1.  */
@@ -593,8 +652,16 @@ void neighbour_choose_and_move_to_next( ant_struct *a , long int phase )
             return;
         }
 	DEBUG( assert ( 0 <= i && i < nn_ants); );
+	if( iLevyFlag )
+	{
+	DEBUG( assert ( prob_ptr[ ordered_city[i] ] >= 0.0); );
+	help = instance.nn_list[current_city][ ordered_city[i] ];
+	}
+	else
+	{
 	DEBUG( assert ( prob_ptr[i] >= 0.0); );
 	help = instance.nn_list[current_city][i];
+	}
 	DEBUG( assert ( help >= 0 && help < n ); )
 	DEBUG( assert ( a->visited[help] == FALSE ); )
 	a->tour[phase] = help; /* instance.nn_list[current_city][i]; */

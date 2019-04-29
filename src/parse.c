@@ -11,6 +11,10 @@
 #include "ants.h"
 #include "ls.h"
 
+extern int iLevyFlag;				// 0 or 1
+extern double dLevyThreshold;		//0--1
+extern double dLevyRatio;			//0.1--5
+extern double dContribution;  		//0--10
 
 #ifndef STR_ERR_UNKNOWN_LONG_OPT
 # define STR_ERR_UNKNOWN_LONG_OPT   "%s: unrecognized option `--%s'\n"
@@ -84,6 +88,11 @@
 #define STR_HELP_LOCALSEARCH \
   "  -l, --localsearch    0: no local search   1: 2-opt   2: 2.5-opt   3: 3-opt\n"
 
+#define STR_HELP_LEVYFLIGHT \
+  "  -L, --levyflight    # Levy Flight Parameters, Threshold;Ratio\n"
+#define STR_HELP_CONTRIBUTION \
+  "  -C, --contribution  # Contribution based Pheromone Update 0 or 1.\n"
+  
 #define STR_HELP_DLB \
   "  -d, --dlb            1 use don't look bits in local search\n"
 
@@ -128,6 +137,8 @@ static const char *const STR_HELP[] = {
   STR_HELP_RASRANKS ,
   STR_HELP_NNLS ,
   STR_HELP_LOCALSEARCH ,
+  STR_HELP_LEVYFLIGHT ,
+  STR_HELP_CONTRIBUTION ,
   STR_HELP_DLB ,
   STR_HELP_AS ,
   STR_HELP_EAS ,
@@ -190,6 +201,11 @@ unsigned int opt_nnls : 1;
 /* Set to 1 if option --localsearch (-l) has been specified.  */
 unsigned int opt_localsearch : 1;
 
+/* Set to 1 if option --levyflight (-L) has been specified.  */
+unsigned int opt_levyflight : 1;
+
+/* Set to 1 if option --contribution (-C) has been specified.  */
+unsigned int opt_contribution : 1;
 /* Set to 1 if option --dlb (-d) has been specified.  */
 unsigned int opt_dlb : 1;
 
@@ -265,6 +281,12 @@ const char *arg_nnls;
 /* Argument to option --localsearch (-l).  */
 const char *arg_localsearch;
 
+/* Argument to option --levyflight (-L).  */
+const char *arg_levyflight;
+
+/* Argument to option --contribution (-C).  */
+const char *arg_contribution;					
+
 /* Argument to option --dlb (-d).  */
 const char *arg_dlb;
 
@@ -292,6 +314,9 @@ parse_options (struct options *const options, const char *const program_name,
   static const char *const optstr__rasranks = "rasranks";
   static const char *const optstr__nnls = "nnls";
   static const char *const optstr__localsearch = "localsearch";
+  static const char *const optstr__levyflight = "levyflight";
+  static const char *const optstr__contribution = "contribution";
+
   static const char *const optstr__dlb = "dlb";
   static const char *const optstr__as = "as";
   static const char *const optstr__eas = "eas";
@@ -318,6 +343,8 @@ parse_options (struct options *const options, const char *const program_name,
   options->opt_rasranks = 0;
   options->opt_nnls = 0;
   options->opt_localsearch = 0;
+  options->opt_levyflight = 0;
+  options->opt_contribution = 0;					   
   options->opt_dlb = 0;
   options->opt_as = 0;
   options->opt_eas = 0;
@@ -343,6 +370,8 @@ parse_options (struct options *const options, const char *const program_name,
   options->arg_rasranks = 0;
   options->arg_nnls = 0;
   options->arg_localsearch = 0;
+  options->arg_levyflight = 0;							  
+  options->arg_contribution = 0;
   options->arg_dlb = 0;
   while (++i < argc)
   {
@@ -525,6 +554,38 @@ parse_options (struct options *const options, const char *const program_name,
             goto error_missing_arg_long;
           }
           options->opt_localsearch = 1;
+          break;
+        }
+        goto error_unknown_long_opt;
+		case 'L':
+        if (strncmp (option + 1, optstr__levyflight + 1, option_len - 1) == 0)
+        {
+          if (argument != 0)
+            options->arg_levyflight = argument;
+          else if (++i < argc)
+            options->arg_levyflight = argv [i];
+          else
+          {
+            option = optstr__levyflight;
+            goto error_missing_arg_long;
+          }
+          options->opt_levyflight = 1;
+          break;
+        }
+        goto error_unknown_long_opt;
+		case 'C':
+        if (strncmp (option + 1, optstr__contribution + 1, option_len - 1) == 0)
+        {
+          if (argument != 0)
+            options->arg_contribution = argument;
+          else if (++i < argc)
+            options->arg_contribution = argv [i];
+          else
+          {
+            option = optstr__contribution;
+            goto error_missing_arg_long;
+          }
+          options->opt_contribution = 1;
           break;
         }
         goto error_unknown_long_opt;
@@ -868,6 +929,26 @@ parse_options (struct options *const options, const char *const program_name,
           option = "\0";
           options->opt_localsearch = 1;
           break;
+         case 'L':
+          if (option [1] != '\0')
+            options->arg_levyflight = option + 1;
+          else if (++i < argc)
+            options->arg_levyflight = argv [i];
+          else
+            goto error_missing_arg_short;
+          option = "\0";
+          options->opt_levyflight = 1;
+          break;
+         case 'C':
+          if (option [1] != '\0')
+            options->arg_contribution = option + 1;
+          else if (++i < argc)
+            options->arg_contribution = argv [i];
+          else
+            goto error_missing_arg_short;
+          option = "\0";
+          options->opt_contribution = 1;
+          break;
          case 'm':
           if (option [1] != '\0')
             options->arg_ants = option + 1;
@@ -1151,6 +1232,24 @@ int parse_commandline (int argc, char *argv [])
     if (ls_flag) {
         set_default_ls_parameters();
     }
+
+    if ( options.opt_levyflight ) {
+        sscanf(options.arg_levyflight, "%lf;%lf", &dLevyThreshold, &dLevyRatio);
+        fputs ("  -L  --levyflight ", stdout);
+        if (options.arg_levyflight != NULL)
+            printf ("with argument \"%lf\" \"%lf\"\n", dLevyThreshold, dLevyRatio);
+		iLevyFlag = 1;
+        check_out_of_range(dLevyThreshold, 0, 1, "dLevyThreshold");
+		check_out_of_range(dLevyRatio, 0, 50, "dLevyRatio");
+    }
+    if ( options.opt_contribution ) {
+        dContribution = atof(options.arg_contribution);
+        fputs ("  -C  --contribution ", stdout);
+        if (options.arg_contribution != NULL)
+            printf ("with argument \"%lf\"\n", dContribution);
+        check_out_of_range(dContribution, 0, 10, "dContribution");
+    }
+
 
     if ( options.opt_ants ) {
 	n_ants = atol(options.arg_ants);
